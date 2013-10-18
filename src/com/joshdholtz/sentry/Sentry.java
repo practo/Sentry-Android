@@ -11,7 +11,6 @@ import java.io.StringWriter;
 import java.io.Writer;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.text.SimpleDateFormat;
-import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -24,14 +23,17 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.net.Uri;
+import android.preference.PreferenceManager;
+import android.util.Log;
+
 import com.joshdholtz.protocol.lib.ProtocolClient;
 import com.joshdholtz.protocol.lib.requests.JSONRequestData;
 import com.joshdholtz.protocol.lib.responses.ProtocolResponseHandler;
 import com.joshdholtz.sentry.Sentry.SentryEventBuilder.SentryEventLevel;
-
-import android.content.Context;
-import android.net.Uri;
-import android.util.Log;
 
 public class Sentry {
 	
@@ -43,8 +45,18 @@ public class Sentry {
 	
 	private ProtocolClient client;
 
-	private static final String TAG = "Sentry";
-	private static final String BASE_URL = "https://app.getsentry.com";
+	public static final String TAG = "Sentry";
+	private static final String BASE_URL = "https://sentry.practo.com";
+	public static final String PREF_USER_EMAIL_ADDRESS = "acra.user.email";
+	//Custom fields
+	private String user;
+	private String android_build;
+	private String android_version;
+	private String android_phone_model;
+	private String android_phone_brand;
+	private String android_phone_product;
+	private String app_version_code;
+	private String app_version_name;
 	
 	private Sentry() {
 
@@ -66,6 +78,23 @@ public class Sentry {
 		Sentry.getInstance().client = new ProtocolClient(BASE_URL);
 		Sentry.getInstance().client.setDebug(true);
 		
+		Sentry.getInstance().android_build =  ReflectionCollector.collectConstants(android.os.Build.class) + ReflectionCollector.collectConstants(android.os.Build.VERSION.class, "VERSION");
+		Sentry.getInstance().android_version = android.os.Build.VERSION.RELEASE;
+		
+		Sentry.getInstance().android_phone_model = android.os.Build.MODEL;
+		Sentry.getInstance().android_phone_brand = android.os.Build.BRAND;
+		Sentry.getInstance().android_phone_product = android.os.Build.PRODUCT;
+		
+		final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);;
+		Sentry.getInstance().user = prefs.getString(PREF_USER_EMAIL_ADDRESS, "N/A");
+		
+        final PackageManagerWrapper pm = new PackageManagerWrapper(context);
+        final PackageInfo pi = pm.getPackageInfo();
+        if (pi != null) {
+    		Sentry.getInstance().app_version_code = Integer.toString(pi.versionCode);
+    		Sentry.getInstance().app_version_name = pi.versionName != null ? pi.versionName : "not set";
+        }
+        
 		submitStackTraces(context);
 
 		UncaughtExceptionHandler currentHandler = Thread.getDefaultUncaughtExceptionHandler();
@@ -122,6 +151,7 @@ public class Sentry {
 		Sentry.captureEvent(new SentryEventBuilder()
 			.setMessage(message)
 			.setLevel(level)
+			.setTags(getTags())
 		);
 	}
 	
@@ -137,6 +167,7 @@ public class Sentry {
 			.setCulprit(culprit)
 			.setLevel(level)
 			.setException(t)
+			.setTags(getTags())
 		);
 		
 		
@@ -180,6 +211,23 @@ public class Sentry {
 		    }
 
 		});
+	}
+	
+	public static void setUser(String user) {
+		Sentry.getInstance().user = user;
+	}
+	
+	public static Map<String,String> getTags() {
+		Map<String,String> tags = new HashMap<String, String>();
+		tags.put("user", Sentry.getInstance().user);
+		tags.put("app_version_code", Sentry.getInstance().app_version_code);
+		tags.put("app_version_name", Sentry.getInstance().app_version_name);
+		tags.put("android_version", Sentry.getInstance().android_version);
+		tags.put("android_build", Sentry.getInstance().android_build);
+		tags.put("android_phone_model", Sentry.getInstance().android_phone_model);
+		tags.put("android_phone_brand", Sentry.getInstance().android_phone_brand);
+		tags.put("android_phone_product", Sentry.getInstance().android_phone_product);
+		return tags;
 	}
 
 	private static class SentryUncaughtExceptionHandler implements UncaughtExceptionHandler {
