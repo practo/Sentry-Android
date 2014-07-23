@@ -3,8 +3,15 @@ It does what every Sentry client needs to do
 
 Below is an example of how to register Sentry-Android to handle uncaught exceptions
 
-```` java
+```xml
+<!-- REQUIRED to send captures to Sentry -->
+<uses-permission android:name="android.permission.INTERNET" />
 
+<!-- OPTIONAL but makes Sentry-Android smarter -->
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+```
+
+``` java
 public class MainActivity extends Activity {
 
 	@Override
@@ -13,50 +20,66 @@ public class MainActivity extends Activity {
 		setContentView(R.layout.activity_main);
 
 		// Sentry will look for uncaught exceptions from previous runs and send them		
-		Sentry.init(this, "YOUR-SENTRY-DSN");
+		Sentry.init(this.getApplicationContext(), "YOUR-SENTRY-DSN");
 
 	}
 
 }
-		
-````
+```
+
+### Updates
+
+Version | Changes
+--- | ---
+**1.1.1** | Uncaught exception handler now calls SentryEventCaptureListener
+**1.1.0** | Saves requests that were captured offline or failed and tries to resend them when it can
+**1.0.0** | Removed dependency to `Protocol`; allows capture of message from background thread
+**0.1.0** | Initial release
 
 ## How To Get Started
-- Download the [Sentry-Android JAR](https://github.com/joshdholtz/Sentry-Android/raw/master/builds/sentry-0.1.3.jar)
-- Download the [Protocol JAR](https://github.com/joshdholtz/Protocol-Android/raw/master/builds/protocol-1.0.4.jar) (Required dependency) - [View more info](https://github.com/joshdholtz/Protocol-Android)
-- Place both the JARs in the Android project's "libs" directory
+- Download the [Sentry-Android JAR - v1.1.1](https://github.com/joshdholtz/Sentry-Android/releases/tag/v1.1.1)
+- Place the JAR in the Android project's "libs" directory
 - Code
 
 ## This Is How We Do It
 
-### Capture a message
-```` java
-Sentry.captureMessage("Something significant may have happened");
+### Permissions in manifest
 
-````
+The AndroidManifest.xml requires the permission `android.permission.INTERNET` and would like the permission `android.permission.ACCESS_NETWORK_STATE` even though optional.
+
+```xml
+<!-- REQUIRED to send captures to Sentry -->
+<uses-permission android:name="android.permission.INTERNET" />
+
+<!-- OPTIONAL but makes Sentry-Android smarter -->
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+```
+
+### Capture a message
+``` java
+Sentry.captureMessage("Something significant may have happened");
+```
 
 ### Capture a caught exception
-```` java
+``` java
 try {
 	JSONObject obj = new JSONObjet();
 } catch (JSONException e) { 
 	Sentry.captureException(e);
 }
-
-````
+```
 
 ### Capture custom event
-```` java
+``` java
 Sentry.captureEvent(new Sentry.SentryEventBuilder()
 	.setMessage("Being awesome")
 	.setCulprit("Josh Holtz")
 	.setTimestamp(System.currentTimeMillis())
 );
-
-````
+```
 
 ### Set a listener to intercept the SentryEventBuilder before each capture
-```` java
+``` java
 // CALL THIS BEFORE CALLING Sentry.init
 // Sets a listener to intercept the SentryEventBuilder before 
 // each capture to set values that could change state
@@ -72,6 +95,7 @@ Sentry.setCaptureListener(new SentryEventCaptureListener() {
 		// Sets extra key if wifi is connected
 		try {
 			builder.getExtra().put("wifi", String.valueOf(mWifi.isConnected()));
+			builder.getTags().put("tag_1", "value_1");
 		} catch (JSONException e) {}
 		
 		return builder;
@@ -79,7 +103,15 @@ Sentry.setCaptureListener(new SentryEventCaptureListener() {
 	
 });
 
-````
+```
+
+## Use for self hosted Sentry
+
+### Init with your base url
+``` java
+Sentry.init(this, "http://your-base-url.com" "YOUR-SENTRY-DSN");
+
+```
 
 ## Contact
 
