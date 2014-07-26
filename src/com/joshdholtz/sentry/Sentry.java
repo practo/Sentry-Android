@@ -53,6 +53,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.preference.PreferenceManager;
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.joshdholtz.sentry.Sentry.SentryEventBuilder.SentryEventLevel;
@@ -73,6 +74,7 @@ public class Sentry {
 	public static final String PREF_USER_EMAIL_ADDRESS = "acra.user.email";
 	//Custom fields
 	private String user;
+	private String city;
 	private String android_build;
 	private String android_version;
 	private String android_phone_model;
@@ -411,9 +413,16 @@ public class Sentry {
 		Sentry.getInstance().user = user;
 	}
 	
+	public static void setCity(String city) {
+		Sentry.getInstance().city = city;
+	}
+	
 	public static Map<String,String> getTags() {
 		Map<String,String> tags = new HashMap<String, String>();
 		tags.put("user", Sentry.getInstance().user);
+		if(!TextUtils.isEmpty(Sentry.getInstance().city)){
+			tags.put("city", Sentry.getInstance().city);	
+		}
 		tags.put("app_version_code", Sentry.getInstance().app_version_code);
 		tags.put("app_version_name", Sentry.getInstance().app_version_name);
 		tags.put("android_version", Sentry.getInstance().android_version);
