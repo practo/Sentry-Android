@@ -195,7 +195,7 @@ public class Sentry {
 		Sentry.captureEvent(new SentryEventBuilder()
 			.setMessage(message)
 			.setLevel(level)
-			.setTags(getTags())
+			.setTags(getSystemTags())
 		);
 	}
 
@@ -211,7 +211,7 @@ public class Sentry {
 			.setCulprit(culprit)
 			.setLevel(level)
 			.setException(t)
-			.setTags(getTags())
+			.setTags(getSystemTags())
 		);
 
 	}
@@ -417,7 +417,7 @@ public class Sentry {
 		Sentry.getInstance().city = city;
 	}
 	
-	public static Map<String,String> getTags() {
+	public static Map<String,String> getSystemTags() {
 		Map<String,String> tags = new HashMap<String, String>();
 		tags.put("user", Sentry.getInstance().user);
 		if(!TextUtils.isEmpty(Sentry.getInstance().city)){
@@ -621,7 +621,8 @@ public class Sentry {
 			this.setMessage(t.getMessage())
 			.setCulprit(culprit)
 			.setLevel(level)
-			.setException(t);
+			.setException(t)
+			.setTags(getSystemTags());
 		}
 
 		/**
