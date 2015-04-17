@@ -32,3 +32,15 @@ android {
     }
 }
 
+task clearJar(type: Delete) {
+    delete 'build/outputs/libsentry.jar'
+}
+
+task makeJar(type: Copy) {
+    from('build/intermediates/bundles/release/')
+    into('build/outputs/')
+    include('classes.jar')
+    rename ('classes.jar', 'libsentry.jar')
+}
+
+makeJar.dependsOn(clearJar, build)
