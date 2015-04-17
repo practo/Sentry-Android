@@ -54,6 +54,8 @@ final class ReflectionCollector {
                 result.append("N/A");
             } catch (IllegalAccessException e) {
                 result.append("N/A");
+            }catch (NullPointerException e){
+                result.append("N/A");
             }
             result.append("\n");
         }
