@@ -1,5 +1,31 @@
 package com.joshdholtz.sentry;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.os.AsyncTask;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
+import android.preference.PreferenceManager;
+import android.text.TextUtils;
+import android.util.Log;
+
+import org.apache.http.HttpResponse;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.params.HttpConnectionParams;
+import org.apache.http.params.HttpParams;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -29,43 +55,13 @@ import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
 
-import org.apache.http.HttpResponse;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.params.HttpConnectionParams;
-import org.apache.http.params.HttpParams;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
-
-import android.content.Context;
-import android.content.SharedPreferences;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
-import android.net.Uri;
-import android.os.AsyncTask;
-import android.os.Handler;
-import android.os.HandlerThread;
-import android.os.Looper;
-import android.preference.PreferenceManager;
-import android.text.TextUtils;
-import android.util.Log;
-
-import com.joshdholtz.sentry.Sentry.SentryEventBuilder.SentryEventLevel;
-
 public class Sentry {
 
-	private final static String VERSION = "0.1.2";
+	private final static String VERSION = "0.1.3";
 
 	private Context context;
 
 	private String baseUrl;
-	private String dsn;
 	private String packageName;
 	private SentryEventCaptureListener captureListener;
 
@@ -82,7 +78,10 @@ public class Sentry {
 	private String android_phone_product;
 	private String app_version_code;
 	private String app_version_name;
-	
+
+	private String publicKey, secretKey;
+	private String projectId;
+
 	private Sentry() {
 
 	}
@@ -95,65 +94,63 @@ public class Sentry {
 		private static Sentry instance = new Sentry();
 	}
 
-	public static void init(Context context, String dsn) {
-		Sentry.init(context, BASE_URL, dsn);
+	public static void init(Context context, String publicKey, String secretKey, String projectId) {
+		Sentry.init(context, BASE_URL, publicKey, secretKey, projectId);
 	}
 
-	public static void init(Context context, String baseUrl, String dsn) {
+	public static void init(Context context, String baseUrl, String publicKey, String secretKey, String projectId) {
 		Sentry.getInstance().context = context;
 
 		Sentry.getInstance().baseUrl = baseUrl;
-		Sentry.getInstance().dsn = dsn;
 		Sentry.getInstance().packageName = context.getPackageName();
 
-		
+		Sentry.getInstance().publicKey = publicKey;
+		Sentry.getInstance().secretKey = secretKey;
+		Sentry.getInstance().projectId = projectId;
+
+
 		Sentry.getInstance().setupUncaughtExceptionHandler();
 	}
-	
+
 	private void setupUncaughtExceptionHandler() {
-		
+
 		Sentry.getInstance().android_build =  ReflectionCollector.collectConstants(android.os.Build.class) + ReflectionCollector.collectConstants(android.os.Build.VERSION.class, "VERSION");
 		Sentry.getInstance().android_version = android.os.Build.VERSION.RELEASE;
-		
+
 		Sentry.getInstance().android_phone_model = android.os.Build.MODEL;
 		Sentry.getInstance().android_phone_brand = android.os.Build.BRAND;
 		Sentry.getInstance().android_phone_product = android.os.Build.PRODUCT;
-		
+
 		final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);;
 		Sentry.getInstance().user = prefs.getString(PREF_USER_EMAIL_ADDRESS, "N/A");
-		
+
         final PackageManagerWrapper pm = new PackageManagerWrapper(context);
         final PackageInfo pi = pm.getPackageInfo();
         if (pi != null) {
     		Sentry.getInstance().app_version_code = Integer.toString(pi.versionCode);
     		Sentry.getInstance().app_version_name = pi.versionName != null ? pi.versionName : "not set";
         }
-        
+
 		UncaughtExceptionHandler currentHandler = Thread.getDefaultUncaughtExceptionHandler();
 		if (currentHandler != null) {
 			Log.d("Debugged", "current handler class="+currentHandler.getClass().getName());
 		}
-		
+
 		// don't register again if already registered
 		if (!(currentHandler instanceof SentryUncaughtExceptionHandler)) {
 			// Register default exceptions handler
 			Thread.setDefaultUncaughtExceptionHandler(
 					new SentryUncaughtExceptionHandler(currentHandler, context));
 		}
-		
+
 		sendAllCachedCapturedEvents();
 	}
 
 	private static String createXSentryAuthHeader() {
 		String header = "";
 
-		Uri uri = Uri.parse(Sentry.getInstance().dsn);
-		Log.d("Sentry", "URI - " + uri);
-		String authority = uri.getAuthority().replace("@" + uri.getHost(), "");
-
-		String[] authorityParts = authority.split(":");
-		String publicKey = authorityParts[0];
-		String secretKey = authorityParts[1];
+		String publicKey = Sentry.getInstance().publicKey;
+		String secretKey = Sentry.getInstance().secretKey;
 
 		header += "Sentry sentry_version=4,";
 		header += "sentry_client=sentry-android/" + VERSION + ",";
@@ -165,11 +162,7 @@ public class Sentry {
 	}
 
 	private static String getProjectId() {
-		Uri uri = Uri.parse(Sentry.getInstance().dsn);
-		String path = uri.getPath();
-		String projectId = path.substring(path.lastIndexOf("/") + 1);
-
-		return projectId;
+		return Sentry.getInstance().projectId;
 	}
 
 	public static void sendAllCachedCapturedEvents() {
@@ -179,7 +172,7 @@ public class Sentry {
 			Sentry.doCaptureEventPost(request);
 		}
 	}
-	
+
 	/**
 	 * @param captureListener the captureListener to set
 	 */
@@ -188,10 +181,10 @@ public class Sentry {
 	}
 
 	public static void captureMessage(String message) {
-		Sentry.captureMessage(message, SentryEventLevel.INFO);
+		Sentry.captureMessage(message, SentryEventBuilder.SentryEventLevel.INFO);
 	}
 
-	public static void captureMessage(String message, SentryEventLevel level) {
+	public static void captureMessage(String message, SentryEventBuilder.SentryEventLevel level) {
 		Sentry.captureEvent(new SentryEventBuilder()
 			.setMessage(message)
 			.setLevel(level)
@@ -200,10 +193,10 @@ public class Sentry {
 	}
 
 	public static void captureException(Throwable t) {
-		Sentry.captureException(t, SentryEventLevel.ERROR);
+		Sentry.captureException(t, SentryEventBuilder.SentryEventLevel.ERROR);
 	}
 
-	public static void captureException(Throwable t, SentryEventLevel level) {
+	public static void captureException(Throwable t, SentryEventBuilder.SentryEventLevel level) {
 		String culprit = getCause(t, t.getMessage());
 
 		Sentry.captureEvent(new SentryEventBuilder()
@@ -268,13 +261,13 @@ public class Sentry {
 	public static void captureEvent(SentryEventBuilder builder) {
 		final SentryEventRequest request;
 		if (Sentry.getInstance().captureListener != null) {
-			
+
 			builder = Sentry.getInstance().captureListener.beforeCapture(builder);
 			if (builder == null) {
 				Log.e(Sentry.TAG, "SentryEventBuilder in captureEvent is null");
 				return;
 			}
-			
+
 			request = new SentryEventRequest(builder);
 		} else {
 			request = new SentryEventRequest(builder);
@@ -308,23 +301,23 @@ public class Sentry {
 		if (hasPerm == PackageManager.PERMISSION_DENIED) {
 		   return true;
 		}
-		
+
 	    ConnectivityManager connectivityManager = (ConnectivityManager) Sentry.getInstance().context.getSystemService(Context.CONNECTIVITY_SERVICE);
 	    NetworkInfo activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
 	    return activeNetworkInfo != null && activeNetworkInfo.isConnected();
 	}
-	
+
 	private static void doCaptureEventPost(final SentryEventRequest request) {
-		
+
 		if (!shouldAttemptPost()) {
 			InternalStorage.getInstance().addRequest(request);
 			return;
 		}
-		
+
 		new AsyncTask<Void, Void, Void>(){
 			@Override
 			protected Void doInBackground(Void... params) {
-				
+
 				HttpClient httpClient = new DefaultHttpClient();
 				HttpPost httpPost = new HttpPost(Sentry.getInstance().baseUrl + "/api/" + getProjectId() + "/store/");
 
@@ -332,7 +325,7 @@ public class Sentry {
 				HttpParams httpParams = httpPost.getParams();
 				HttpConnectionParams.setConnectionTimeout(httpParams, TIMEOUT_MILLISEC);
 				HttpConnectionParams.setSoTimeout(httpParams, TIMEOUT_MILLISEC);
-				
+
 				boolean success = false;
 				try {
 					httpPost.setHeader("X-Sentry-Auth", createXSentryAuthHeader());
@@ -368,7 +361,7 @@ public class Sentry {
 					}
 
 					success = (status == 200);
-					
+
 					Log.d(TAG, "SendEvent - " + status + " " + stringResponse);
 				} catch (ClientProtocolException e) {
 					e.printStackTrace();
@@ -377,7 +370,7 @@ public class Sentry {
 				} catch (Exception e) {
 					e.printStackTrace();
 				}
-				
+
 				if (success) {
 					InternalStorage.getInstance().removeBuilder(request);
 				} else {
@@ -387,7 +380,7 @@ public class Sentry {
 				return null;
 			}
 
-			private byte[] readBytes(InputStream inputStream) throws IOException { 
+			private byte[] readBytes(InputStream inputStream) throws IOException {
 				// this dynamically extends to take the bytes you read
 				ByteArrayOutputStream byteBuffer = new ByteArrayOutputStream();
 
@@ -408,20 +401,20 @@ public class Sentry {
 		}.execute();
 
 	}
-	
+
 	public static void setUser(String user) {
 		Sentry.getInstance().user = user;
 	}
-	
+
 	public static void setCity(String city) {
 		Sentry.getInstance().city = city;
 	}
-	
+
 	public static Map<String,String> getSystemTags() {
 		Map<String,String> tags = new HashMap<String, String>();
 		tags.put("user", Sentry.getInstance().user);
 		if(!TextUtils.isEmpty(Sentry.getInstance().city)){
-			tags.put("city", Sentry.getInstance().city);	
+			tags.put("city", Sentry.getInstance().city);
 		}
 		tags.put("app_version_code", Sentry.getInstance().app_version_code);
 		tags.put("app_version_name", Sentry.getInstance().app_version_name);
@@ -458,17 +451,17 @@ public class Sentry {
                 Log.e(Sentry.TAG, "SentryEventBuilder in uncaughtException is null");
             }
 
-			//call original handler  
-			defaultExceptionHandler.uncaughtException(thread, e);  
+			//call original handler
+			defaultExceptionHandler.uncaughtException(thread, e);
 		}
 
 	}
-	
+
 	private static class InternalStorage {
 
 		private final static String FILE_NAME = "unsent_requests";
 		private ArrayList<SentryEventRequest> unsentRequests;
-		
+
 		private static InternalStorage getInstance() {
 			return LazyHolder.instance;
 		}
@@ -476,11 +469,11 @@ public class Sentry {
 		private static class LazyHolder {
 			private static InternalStorage instance = new InternalStorage();
 		}
-		
+
 		private InternalStorage() {
 			this.unsentRequests = this.readObject(Sentry.getInstance().context);
-		}		
-		
+		}
+
 		/**
 		 * @return the unsentRequests
 		 */
@@ -497,7 +490,7 @@ public class Sentry {
 				}
 			}
 		}
-		
+
 		public void removeBuilder(SentryEventRequest request) {
 			synchronized(this) {
 				Log.d(Sentry.TAG, "Removing request - " + request.uuid);
@@ -544,16 +537,16 @@ public class Sentry {
 		public abstract SentryEventBuilder beforeCapture(SentryEventBuilder builder);
 
 	}
-	
+
 	public static class SentryEventRequest implements Serializable {
 		private String requestData;
 		private UUID uuid;
-		
+
 		public SentryEventRequest(SentryEventBuilder builder) {
 			this.requestData = new JSONObject(builder.event).toString();
 			this.uuid = UUID.randomUUID();
 		}
-		
+
 		/**
 		 * @return the requestData
 		 */
@@ -571,20 +564,20 @@ public class Sentry {
 		@Override
 		public boolean equals(Object other) {
 			SentryEventRequest otherRequest = (SentryEventRequest) other;
-			
+
 			if (this.uuid != null && otherRequest.uuid != null) {
 				return uuid.equals(otherRequest.uuid);
 			}
-			
+
 			return false;
 		}
-		
+
 	}
 
 	public static class SentryEventBuilder implements Serializable {
 
 		private static final long serialVersionUID = -8589756678369463988L;
-		
+
 		private final static SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
 		static {
 			sdf.setTimeZone(TimeZone.getTimeZone("GMT"));
@@ -612,12 +605,12 @@ public class Sentry {
 			event.put("event_id", UUID.randomUUID().toString().replace("-", ""));
 			this.setTimestamp(System.currentTimeMillis());
 		}
-		
+
 		public SentryEventBuilder(Throwable t, SentryEventLevel level) {
 			this();
-			
+
 			String culprit = getCause(t, t.getMessage());
-			
+
 			this.setMessage(t.getMessage())
 			.setCulprit(culprit)
 			.setLevel(level)
@@ -676,7 +669,7 @@ public class Sentry {
 		}
 
 		/**
-		 * 
+		 *
 		 * @param tags
 		 * @return
 		 */
@@ -699,7 +692,7 @@ public class Sentry {
 		}
 
 		/**
-		 * 
+		 *
 		 * @param serverName
 		 * @return
 		 */
@@ -709,7 +702,7 @@ public class Sentry {
 		}
 
 		/**
-		 * 
+		 *
 		 * @param name
 		 * @param version
 		 * @return
@@ -732,7 +725,7 @@ public class Sentry {
 		}
 
 		/**
-		 * 
+		 *
 		 * @param extra
 		 * @return
 		 */
